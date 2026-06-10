@@ -7,10 +7,23 @@ from typing import Optional
 
 from pydantic_settings import BaseSettings
 
-# Resolve .env relative to this file's location (src/insight/config.py)
-# so it works regardless of uvicorn's working directory.
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_ENV_FILE = _PROJECT_ROOT / ".env"
+# Find .env: check ENV_FILE env var first, then common locations.
+def _find_env_file() -> str:
+    import os
+    explicit = os.environ.get("ENV_FILE")
+    if explicit and Path(explicit).exists():
+        return explicit
+    candidates = [
+        Path.cwd() / ".env",                                    # working directory
+        Path(__file__).resolve().parent.parent.parent / ".env",  # relative to source
+        Path("/app/.env"),                                       # Docker default
+    ]
+    for p in candidates:
+        if p.exists():
+            return str(p)
+    return ".env"  # fallback
+
+_ENV_FILE = _find_env_file()
 
 
 class Settings(BaseSettings):
@@ -42,7 +55,7 @@ class Settings(BaseSettings):
 
     model_config = {
         "env_prefix": "INSIGHT_",
-        "env_file": str(_ENV_FILE),
+        "env_file": _ENV_FILE,
         "env_file_encoding": "utf-8",
         "extra": "ignore",
     }
