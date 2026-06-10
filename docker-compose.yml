@@ -1,0 +1,9 @@
+services:
+  insight:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./keys.csv:/app/keys.csv
+      - ./.env:/app/.env
+    restart: unless-stopped
