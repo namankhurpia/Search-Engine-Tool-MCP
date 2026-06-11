@@ -1,6 +1,7 @@
 """FastAPI application — exposes POST /insight for agent callers (plan.md S3)."""
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
@@ -13,6 +14,8 @@ from .engine import Engine
 from .errors import InsightError
 from .models import InsightRequest, InsightResponse, InsightType
 from .providers import build_provider
+
+logger = logging.getLogger("insight")
 
 
 @asynccontextmanager
@@ -34,6 +37,33 @@ app = FastAPI(
     description="One web-research endpoint for LLM agents. POST /insight with {type, query}.",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log every incoming request with method, path, client IP, and headers."""
+    client = request.client.host if request.client else "unknown"
+    headers = dict(request.headers)
+    # Mask the auth token for security
+    if "authorization" in headers:
+        token = headers["authorization"]
+        if len(token) > 20:
+            headers["authorization"] = token[:15] + "..." + token[-4:]
+    logger.info(
+        "REQUEST %s %s from=%s headers=%s",
+        request.method,
+        request.url.path,
+        client,
+        headers,
+    )
+    response = await call_next(request)
+    logger.info(
+        "RESPONSE %s %s status=%d",
+        request.method,
+        request.url.path,
+        response.status_code,
+    )
+    return response
 
 
 @app.exception_handler(InsightError)

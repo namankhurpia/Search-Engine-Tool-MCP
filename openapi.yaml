@@ -1,0 +1,397 @@
+openapi: "3.1.0"
+info:
+  title: Insight Engine
+  description: |
+    One web-research endpoint for LLM agents.
+
+    Send a `type` (the action) and a `query`, get back clean, cited JSON.
+    Backed by Perplexity — raw modes use the Search API, synth modes use Sonar.
+
+    **Authentication:** All `/insight` requests require a Bearer token.
+    Public endpoints (`/health`, `/types`) do not require auth.
+
+    **Base URL:** `http://192.9.137.43:8000`
+  version: "0.2.0"
+  contact:
+    name: Naman Khurpia
+    email: namankhurpia2@gmail.com
+
+servers:
+  - url: http://192.9.137.43:8000
+    description: Oracle Cloud production server
+
+security: []
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Returns service status, provider, and config info. No auth required.
+      operationId: health
+      tags: [Status]
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  provider:
+                    type: string
+                    example: perplexity
+                  synth_model:
+                    type: string
+                    example: sonar
+                  cache:
+                    type: boolean
+                    example: true
+                  auth:
+                    type: boolean
+                    example: true
+
+  /types:
+    get:
+      summary: List available action types
+      description: Returns all supported insight types. Useful for agent self-discovery. No auth required.
+      operationId: listTypes
+      tags: [Status]
+      responses:
+        "200":
+          description: Available types
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  types:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/InsightType"
+              example:
+                types:
+                  - search
+                  - news
+                  - local
+                  - deals
+                  - answer
+                  - recommend
+                  - compare
+                  - reviews
+                  - alternatives
+
+  /insight:
+    post:
+      summary: Run an insight query
+      description: |
+        The main endpoint. Send a type and query to get structured, cited results.
+
+        **Raw modes** (`search`, `news`, `local`, `deals`) return ranked web results
+        via Perplexity's Search API. No synthesized answer.
+
+        **Synth modes** (`answer`, `recommend`, `compare`, `reviews`, `alternatives`)
+        return a synthesized answer with citations via Perplexity Sonar.
+
+        Paginated modes (`search`, `news`, `local`, `reviews`) support the `page` parameter.
+      operationId: runInsight
+      tags: [Insight]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InsightRequest"
+            examples:
+              search:
+                summary: Raw web search
+                value:
+                  type: search
+                  query: "python web frameworks"
+                  safety: true
+                  page: 1
+              answer:
+                summary: Synthesized answer
+                value:
+                  type: answer
+                  query: "How does CRISPR gene editing work?"
+              recommend:
+                summary: Product recommendations
+                value:
+                  type: recommend
+                  query: "best budget over-ear headphones under $100"
+              compare:
+                summary: Side-by-side comparison
+                value:
+                  type: compare
+                  query: "iPhone 16 vs Samsung Galaxy S25"
+              news:
+                summary: Recent news
+                value:
+                  type: news
+                  query: "AI breakthroughs 2026"
+              deals:
+                summary: Price / deals lookup
+                value:
+                  type: deals
+                  query: "macbook air m4 price"
+              reviews:
+                summary: Aggregated reviews
+                value:
+                  type: reviews
+                  query: "Sony WH-1000XM5"
+              alternatives:
+                summary: Competitors / substitutes
+                value:
+                  type: alternatives
+                  query: "alternatives to Notion"
+              local:
+                summary: Local places
+                value:
+                  type: local
+                  query: "coffee shops in San Francisco"
+      responses:
+        "200":
+          description: Successful insight response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InsightResponse"
+              examples:
+                raw_mode:
+                  summary: Raw search result (no answer)
+                  value:
+                    type: search
+                    query: "python web frameworks"
+                    results:
+                      - title: "Best Python Web Frameworks 2026"
+                        url: "https://example.com/frameworks"
+                        snippet: "Django, Flask, and FastAPI lead the pack..."
+                        date: "2026-06-01"
+                        last_updated: null
+                    answer: null
+                    sources:
+                      - "https://example.com/frameworks"
+                    page: 1
+                    has_more: true
+                    safety_applied: true
+                synth_mode:
+                  summary: Synthesized answer with sources
+                  value:
+                    type: answer
+                    query: "How does CRISPR work?"
+                    results:
+                      - title: "CRISPR Explained"
+                        url: "https://example.com/crispr"
+                        snippet: ""
+                        date: null
+                        last_updated: null
+                    answer: "CRISPR uses a guide RNA to direct the Cas9 enzyme to a specific DNA sequence, where it makes a cut..."
+                    sources:
+                      - "https://example.com/crispr"
+                    page: 1
+                    has_more: false
+                    safety_applied: true
+        "401":
+          description: Missing auth token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: AUTH_REQUIRED
+                  message: "Missing Authorization header. Use: Authorization: Bearer <your-api-key>"
+        "403":
+          description: Invalid or revoked API key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: INVALID_API_KEY
+                  message: "The provided API key is invalid or has been revoked."
+        "422":
+          description: Validation error (bad type, missing query, etc.)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: INVALID_REQUEST
+                  message: "type: Input should be 'search', 'news', 'local', ..."
+        "502":
+          description: Upstream provider error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: PROVIDER_ERROR
+                  message: "Upstream provider returned an error: 429 rate limited"
+        "503":
+          description: Provider not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: PROVIDER_UNCONFIGURED
+                  message: "The search provider API key is not set. Check your .env file."
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        API key created via `python -m insight.cli create "key-name"`.
+        Keys are prefixed with `ink_`.
+
+  schemas:
+    InsightType:
+      type: string
+      enum:
+        - search
+        - news
+        - local
+        - deals
+        - answer
+        - recommend
+        - compare
+        - reviews
+        - alternatives
+      description: |
+        The action to perform.
+
+        **Raw modes** (Search API, no synthesis):
+        - `search` — general web search (paginated)
+        - `news` — recent articles, last week (paginated)
+        - `local` — nearby places/services (paginated)
+        - `deals` — price / where-to-buy results
+
+        **Synth modes** (Sonar, returns `answer`):
+        - `answer` — synthesized, cited answer
+        - `recommend` — ranked product picks
+        - `compare` — side-by-side comparison + verdict
+        - `reviews` — sentiment summary, pros/cons (paginated)
+        - `alternatives` — competitors / substitutes
+
+    InsightRequest:
+      type: object
+      required:
+        - type
+        - query
+      properties:
+        type:
+          $ref: "#/components/schemas/InsightType"
+        query:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Natural-language query
+          example: "best budget over-ear headphones under $100"
+        safety:
+          type: boolean
+          default: true
+          description: Content filter. true = drop blocklisted/flagged results.
+        page:
+          type: integer
+          minimum: 1
+          default: 1
+          description: Page number. Only used by paginated modes (search, news, local, reviews).
+
+    InsightResponse:
+      type: object
+      required:
+        - type
+        - query
+      properties:
+        type:
+          $ref: "#/components/schemas/InsightType"
+        query:
+          type: string
+          description: The original query, echoed back.
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourceResult"
+          default: []
+          description: List of source results (always present for all modes).
+        answer:
+          type: string
+          nullable: true
+          description: Synthesized answer text. Only present for synth modes; null for raw modes.
+        sources:
+          type: array
+          items:
+            type: string
+            format: uri
+          default: []
+          description: Flat list of source URLs for easy citation.
+        page:
+          type: integer
+          default: 1
+          description: Current page number.
+        has_more:
+          type: boolean
+          default: false
+          description: Whether more pages are available.
+        safety_applied:
+          type: boolean
+          default: true
+          description: Whether the safety filter was applied to this response.
+
+    SourceResult:
+      type: object
+      properties:
+        title:
+          type: string
+          default: ""
+          description: Page title.
+        url:
+          type: string
+          default: ""
+          description: Source URL.
+        snippet:
+          type: string
+          default: ""
+          description: Text snippet or excerpt.
+        date:
+          type: string
+          nullable: true
+          description: Publication date (if available).
+        last_updated:
+          type: string
+          nullable: true
+          description: Last updated date (if available).
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              description: Machine-readable error code.
+              enum:
+                - AUTH_REQUIRED
+                - INVALID_API_KEY
+                - INVALID_REQUEST
+                - PROVIDER_ERROR
+                - PROVIDER_UNCONFIGURED
+            message:
+              type: string
+              description: Human-readable error message.
