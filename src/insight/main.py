@@ -15,7 +15,9 @@ from .errors import InsightError
 from .models import InsightRequest, InsightResponse, InsightType
 from .providers import build_provider
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("insight")
+logger.setLevel(logging.INFO)
 
 
 @asynccontextmanager
