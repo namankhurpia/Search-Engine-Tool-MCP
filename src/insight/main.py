@@ -1,6 +1,7 @@
 """FastAPI application — exposes POST /insight for agent callers (plan.md S3)."""
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import asynccontextmanager
 
@@ -15,7 +16,34 @@ from .errors import InsightError
 from .models import InsightRequest, InsightResponse, InsightType
 from .providers import build_provider
 
-logging.basicConfig(level=logging.INFO)
+# --- ANSI colors for terminal output -----------------------------------------
+_CYAN = "\033[96m"
+_GREEN = "\033[92m"
+_YELLOW = "\033[93m"
+_RED = "\033[91m"
+_MAGENTA = "\033[95m"
+_BLUE = "\033[94m"
+_BOLD = "\033[1m"
+_RESET = "\033[0m"
+
+# Color per insight type
+_TYPE_COLORS = {
+    "search": _CYAN,
+    "news": _YELLOW,
+    "local": _GREEN,
+    "deals": _MAGENTA,
+    "answer": _BLUE,
+    "recommend": f"\033[38;5;208m",  # orange
+    "compare": f"\033[38;5;213m",    # pink
+    "reviews": f"\033[38;5;220m",    # gold
+    "alternatives": f"\033[38;5;159m",  # light blue
+}
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 logger = logging.getLogger("insight")
 logger.setLevel(logging.INFO)
 
@@ -43,27 +71,53 @@ app = FastAPI(
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    """Log every incoming request with method, path, client IP, and headers."""
+    """Log every incoming request with method, path, client IP, query type, and headers."""
     client = request.client.host if request.client else "unknown"
+    path = request.url.path
+
+    # Try to read the body for /insight to extract type and query
+    body_info = ""
+    if request.method == "POST" and path == "/insight":
+        try:
+            body_bytes = await request.body()
+            body = json.loads(body_bytes)
+            req_type = body.get("type", "?")
+            req_query = body.get("query", "?")
+            color = _TYPE_COLORS.get(req_type, _CYAN)
+            body_info = (
+                f" | {color}{_BOLD}type={req_type}{_RESET}"
+                f" | {color}query=\"{req_query}\"{_RESET}"
+            )
+        except Exception:
+            body_info = " | body=<unreadable>"
+
+    # Mask auth header
     headers = dict(request.headers)
-    # Mask the auth token for security
     if "authorization" in headers:
         token = headers["authorization"]
         if len(token) > 20:
             headers["authorization"] = token[:15] + "..." + token[-4:]
+
     logger.info(
-        "REQUEST %s %s from=%s headers=%s",
-        request.method,
-        request.url.path,
-        client,
-        headers,
+        f"{_GREEN}>>> {request.method} {path}{_RESET}"
+        f" | from={_BOLD}{client}{_RESET}"
+        f"{body_info}"
+        f" | auth={headers.get('authorization', 'none')}"
     )
+
     response = await call_next(request)
+
+    status = response.status_code
+    if status < 300:
+        status_color = _GREEN
+    elif status < 400:
+        status_color = _YELLOW
+    else:
+        status_color = _RED
+
     logger.info(
-        "RESPONSE %s %s status=%d",
-        request.method,
-        request.url.path,
-        response.status_code,
+        f"{status_color}<<< {request.method} {path}"
+        f" -> {status}{_RESET}"
     )
     return response
 
